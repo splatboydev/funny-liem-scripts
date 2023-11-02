@@ -1,0 +1,7 @@
+// Paste this into a console and replace <path> with whatever path you want.
+
+let socket = io();
+
+socket.onAny(console.log);
+
+socket.emit("getfile", "<path>");
