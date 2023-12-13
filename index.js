@@ -18,9 +18,8 @@ const bcrypt = require("bcryptjs");
 const e = require("cors");
 const WebSocket = require('ws');
 var exec = require('child_process').exec;
+const exerciseScripts = require("./scripts/criteria.js");
 const libre = require('libreoffice-convert');
-const { send } = require("process");
-const { dir } = require("console");
 
 let token;
 let activeTest = [];
@@ -238,7 +237,7 @@ io.on("connection", async function (socket) {
     try {
       db.query(
         {
-          sql: "SELECT name, AdminTestWrong FROM users",
+          sql: "SELECT name, AdminTestWrong, AdminExerciseWrong FROM users",
         },
         function (err, results) {
           if (err) throw err;
@@ -263,6 +262,32 @@ io.on("connection", async function (socket) {
       callback(cppcontent, cppc);
     } else if (data == "scratch") {
       callback(scratchcontent, scratchc);
+    }
+  });
+  socket.on("getExercise", function(callback) {
+    try {
+      db.query(
+        {
+          sql:
+            "SELECT exercise FROM exerciseScript"
+        },
+        function (err, results) {
+          let obj = {};
+          results.forEach((element) => {
+            element = element.exercise;
+            let lesson = "Lesson " + element.slice(0,2);
+            if (obj.hasOwnProperty(lesson)) {
+              obj[lesson].push(element);
+            } else {
+              obj[lesson] = [];
+              obj[lesson].push(element);
+            }
+          })
+          callback(obj);
+        }
+      );
+    } catch (err) {
+      console.error("There was an error ", err);
     }
   });
 
@@ -804,12 +829,6 @@ io.on("connection", async function (socket) {
         socket.emit("returncommand", value);
       }
       socket.emit("gotAlert", alert);
-    } else if (icommand[0] == "r") {
-      user = icommand[1];
-      socket.broadcast.emit("restoreTest", user);
-
-      value = `Sent restore request to client: ${user}.`;
-      socket.emit("returncommand", value);
     } else if (icommand[0] == "cta") {
       test = icommand[1];
       question = icommand[2];
@@ -1214,7 +1233,7 @@ io.on("connection", async function (socket) {
         let path = `./public/topics/${dir}/${unit}`;
         socket.emit("returncommand", path);
       } catch(err) {
-        socket.emit("returncommand", "Invalid inputs");
+        socket.emit("returncommand", err);
       }
     } else if (icommand[0] == "rf") {
       try {
@@ -1595,7 +1614,7 @@ io.on("connection", async function (socket) {
 
   socket.on('dataChunk', ({data, path}) => {
     receivedChunks.push(data);
-    if (receivedChunks.length == 5) {
+    if (receivedChunks.length == 30) {
       if (fs.existsSync(path) === false) {
         socket.emit("returncommand", "Loading...");
         let data = Buffer.concat(receivedChunks);
@@ -1668,8 +1687,7 @@ io.on("connection", async function (socket) {
             scandir();
           })
           .catch((err) => {
-            console.log(err);
-            socket.emit("returncommand", "Invalid inputs");
+            socket.emit("returncommand", err);
           });
       }
     }
@@ -2359,6 +2377,48 @@ io.on("connection", async function (socket) {
     socket.broadcast.emit("adminStudentActivity", msg);
   });
 
+  socket.on("tempAnswer", function (data) {
+    let user = data.user;
+    let answer = data.answer;
+    try {
+      db.query(
+        {
+          sql:
+            "UPDATE users SET tempAnswer =" +
+            "'" +
+            answer +
+            "'" +
+            ` WHERE name = '` +
+            user +
+            `'`,
+        },
+        function (err, results) {
+          if (err) throw err;
+        }
+      );
+    } catch (err) {
+      console.log(err);
+    }
+  });
+
+  socket.on("getAnswers", function (user, callback) {
+    try {
+      db.query(
+        {
+          sql: "SELECT tempAnswer FROM users" + ` WHERE name = '` + user + `'`,
+        },
+        function (err, results) {
+          if (results[0]) {
+            callback(results[0].tempAnswer);
+          }
+          
+        }
+      );
+    } catch (err) {
+      console.log(err);
+    }
+  });
+
   socket.on("renamefile", function (filepath, newpath) {
     if (filepath.endsWith(".java")) {
       let classpath = filepath.slice(0, -4) + "class";
@@ -2702,6 +2762,177 @@ io.on("connection", async function (socket) {
       }
     }
   });
+
+  socket.on("getChecked", (data, student, exercise, callback) => {
+
+    try {
+      db.query(
+        {
+          sql:
+            "SELECT script FROM exerciseScript" +
+            ` WHERE exercise = '` +
+            exercise +
+            `'`,
+        },
+        function (err, results) {
+          
+          let script = `
+          window.onload = async function () {
+            let socket = io();
+              
+            let scores = [];
+            let criteria = [];\n`;
+          
+          let scripts = results[0].script.split(",");
+          
+          for (let i = 0; i < scripts.length; i++) {
+            let instruction = scripts[i].split("_");
+            let required = instruction[1] + instruction[0];
+            let optional = (instruction[2] != "*" && instruction[3] != "*") ? " (" + instruction[2] + "==" + instruction[3] + ")" : "";
+            let criteria = required + optional;
+            script += `\tcriteria.push("${criteria}");\n`;
+            script += exerciseScripts.ultimate(scripts[i]);
+          }
+
+          script += `\n\tsocket.emit("getScore", "${student}", "${exercise}", scores, criteria);\n}`;
+    
+          fs.writeFile("./public/exercises/temp.js", script, (err) => {
+            if (err) {
+              console.log(err);
+            }
+            fs.writeFile("./public/exercises/temp.html", data, (err) => {
+              if (err) {
+                console.log(err);
+              }
+              callback();
+            });
+          });
+          
+          console.log(script);
+        }
+      );
+    } catch (err) {
+      console.error("There was an error ", err);
+    }
+    
+  })
+
+  socket.on("getScore", (user, exercise, scores, criteria) => {
+    let possible = criteria.length;
+    let sum = 0;
+    let msg = "";
+    let wrong = [];
+    let percent;
+    let reCheck = false;
+
+    scores.forEach(score => {
+      sum += score;
+    })
+
+    msg = `Marking Criteria(${exercise})\n`;
+    for (let i = 0; i < possible; i++) {
+      msg += criteria[i] + ": " + scores[i] + "/1" + "\n";
+    }
+    msg += `Total score: ${sum}/${possible}`;
+    
+    for (let i = 0; i < possible; i++) {
+      if (scores[i] == 0) {
+        wrong.push(criteria[i]);
+      }
+    }
+    if (wrong.length == 0) {
+      wrong.push("N/A");
+    }
+
+    percent = ((sum / possible) * "100").toFixed(1) + "%";
+
+    try {
+      db.query(
+        {
+          sql:
+            "SELECT AdminExerciseWrong FROM users" +
+            ` WHERE name = '` +
+            user +
+            `'`,
+        },
+        function (err, results) {
+
+          let grade = JSON.parse(results[0].AdminExerciseWrong);
+          for (let i = 0; i < grade.length; i++) {
+            if (grade[i].Exercise == exercise) {
+              grade[i].Mark = sum;
+              grade[i].Percent = percent;
+              grade[i].Wrong = wrong;
+              reCheck = true;
+              console.log("yes");
+            }
+          }
+          if (reCheck) {
+            objgradesAdmin = JSON.stringify(grade);
+          } else {
+            if (results[0].AdminExerciseWrong.length == 2) {
+              objgradesAdmin =
+              results[0].AdminExerciseWrong.slice(0, -1) +
+              '{"Exercise":' +
+              '"' +
+              exercise +
+              '"' +
+              ',"Mark":' +
+              sum +
+              ',"Possible":' +
+              possible +
+              ',"Percent":"' +
+              percent +
+              '","Wrong":"' +
+              wrong +
+              '"}]';
+            } else {
+              objgradesAdmin =
+              results[0].AdminExerciseWrong.slice(0, -1) +
+              ',{"Exercise":' +
+              '"' +
+              exercise +
+              '"' +
+              ',"Mark":' +
+              sum +
+              ',"Possible":' +
+              possible +
+              ',"Percent":"' +
+              percent +
+              '","Wrong":"' +
+              wrong +
+              '"}]';
+            }
+          }
+          console.log(objgradesAdmin);
+          try {
+            db.query(
+              {
+                sql:
+                  "UPDATE users SET AdminExerciseWrong =" +
+                  "'" +
+                  objgradesAdmin +
+                  "'" +
+                  ` WHERE name = '` +
+                  user +
+                  `'`,
+              },
+              function (err, results) {
+                if (err) throw err;
+              }
+            );
+          } catch (err) {
+            console.error("There was an error ", err);
+          }
+          
+        }
+      );
+    } catch (err) {
+      console.error("There was an error ", err);
+    }
+    
+    socket.broadcast.emit("showScore", msg);
+  })
 
   socket.on("markExercise", function (user, file, name) {
     wss.myFunction(user, file, name)
