@@ -269,21 +269,17 @@ io.on("connection", async function (socket) {
       db.query(
         {
           sql:
-            "SELECT exercise FROM exerciseScript"
+            "SELECT exercise, script FROM exerciseScript"
         },
         function (err, results) {
-          let obj = {};
+          let data = [];
           results.forEach((element) => {
-            element = element.exercise;
-            let lesson = "Lesson " + element.slice(0,2);
-            if (obj.hasOwnProperty(lesson)) {
-              obj[lesson].push(element);
-            } else {
-              obj[lesson] = [];
-              obj[lesson].push(element);
-            }
-          })
-          callback(obj);
+            let exercise = [];
+            exercise.push(element.exercise);
+            exercise.push(element.script);
+            data.push(exercise);
+          });
+          callback(data);
         }
       );
     } catch (err) {
@@ -2764,7 +2760,7 @@ io.on("connection", async function (socket) {
   });
 
   socket.on("getChecked", (data, student, exercise, callback) => {
-
+         
     try {
       db.query(
         {
@@ -2775,46 +2771,50 @@ io.on("connection", async function (socket) {
             `'`,
         },
         function (err, results) {
-          
-          let script = `
-          window.onload = async function () {
-            let socket = io();
+          try {
+            let script = `
+            window.onload = async function () {
+              let socket = io();
+                
+              let scores = [];
+              let criteria = [];\n`;
+            
+            let scripts = JSON.parse(results[0].script);
+            
+            for (let i = 0; i < scripts.length; i++) {
               
-            let scores = [];
-            let criteria = [];\n`;
-          
-          let scripts = results[0].script.split(",");
-          
-          for (let i = 0; i < scripts.length; i++) {
-            let instruction = scripts[i].split("_");
-            let required = instruction[1] + instruction[0];
-            let optional = (instruction[2] != "*" && instruction[3] != "*") ? " (" + instruction[2] + "==" + instruction[3] + ")" : "";
-            let criteria = required + optional;
-            script += `\tcriteria.push("${criteria}");\n`;
-            script += exerciseScripts.ultimate(scripts[i]);
-          }
-
-          script += `\n\tsocket.emit("getScore", "${student}", "${exercise}", scores, criteria);\n}`;
-    
-          fs.writeFile("./public/exercises/temp.js", script, (err) => {
-            if (err) {
-              console.log(err);
+              let required = scripts[i].Number + "<" + scripts[i].Tag + ">";
+              let optional = (scripts[i].Attribute != "*") ? " with " + scripts[i].Attribute + " == " + scripts[i].Value : "";
+              let criteria = required + optional;
+              
+              script += `\tcriteria.push("${criteria}");\n`;
+              script += exerciseScripts.ultimate(scripts[i]);
+              
             }
-            fs.writeFile("./public/exercises/temp.html", data, (err) => {
+
+            script += `\n\tsocket.emit("getScore", "${student}", "${exercise}", scores, criteria);\n}`;
+      
+            fs.writeFile("./public/exercises/temp.js", script, (err) => {
               if (err) {
                 console.log(err);
               }
-              callback();
+              fs.writeFile("./public/exercises/temp.html", data, (err) => {
+                if (err) {
+                  console.log(err);
+                }
+                callback();
+              });
             });
-          });
-          
-          console.log(script);
+            
+            console.log(script);
+          } catch (err) {
+            callback("error");
+          }
         }
       );
     } catch (err) {
       console.error("There was an error ", err);
     }
-    
   })
 
   socket.on("getScore", (user, exercise, scores, criteria) => {
@@ -2932,6 +2932,149 @@ io.on("connection", async function (socket) {
     }
     
     socket.broadcast.emit("showScore", msg);
+  });
+  socket.on("setScript", function (exercise, tag, number, attribute, value) {
+    try {
+      db.query(
+        {
+          sql:
+            "SELECT exercise, script FROM exerciseScript" +
+            ` WHERE exercise = '` +
+            exercise +
+            `'`,
+        },
+        function (err, results) {
+          let exercise = results[0].exercise;
+          let scripts = JSON.parse(results[0].script);
+          let instruction = {
+            Tag: tag,
+            Number: number,
+            Attribute: attribute,
+            Value: value
+          }
+          scripts.push(instruction);
+          let final = JSON.stringify(scripts);
+          try {
+            db.query(
+              {
+                sql:
+                  "UPDATE exerciseScript SET script =" +
+                  "'" +
+                  final +
+                  "'" +
+                  ` WHERE exercise = '` +
+                  exercise +
+                  `'`,
+              },
+              function (err, results) {
+                if (err) throw err;
+              }
+            );
+          } catch (err) {
+            console.error("There was an error ", err);
+          }
+          
+        }
+      );
+    } catch (err) {
+      console.error("There was an error ", err);
+    }
+  });
+
+  socket.on("delScript", (exercise, todel) => {
+    try {
+      db.query(
+        {
+          sql:
+            "SELECT script FROM exerciseScript" +
+            ` WHERE exercise = '` +
+            exercise +
+            `'`,
+        },
+        function (err, results) {
+          let scripts = JSON.parse(results[0].script);
+          for (let i = 0; i < scripts.length; i++) {
+            for (let j = 0; j < todel.length; j++) {
+              if (
+                scripts[i].Tag == todel[j].Tag &&
+                scripts[i].Number == todel[j].Number &&
+                scripts[i].Attribute == todel[j].Attribute &&
+                scripts[i].Value == todel[j].Value
+              ) {
+                let fscripts = scripts.slice(0, i);
+                let lscripts = scripts.slice(i + 1);
+                scripts = fscripts.concat(lscripts);
+              }
+            }
+          }
+          let final = JSON.stringify(scripts);
+          try {
+            db.query(
+              {
+                sql:
+                  "UPDATE exerciseScript SET script =" +
+                  "'" +
+                  final +
+                  "'" +
+                  ` WHERE exercise = '` +
+                  exercise +
+                  `'`,
+              },
+              function (err, results) {
+                if (err) throw err;
+              }
+            );
+          } catch (err) {
+            console.error("There was an error ", err);
+          }
+          
+        }
+      );
+    } catch (err) {
+      console.error("There was an error ", err);
+    }
+  })
+  socket.on("addLesson", (exercise) => {
+    console.log(exercise);
+    try {
+      db.query(
+        {
+          sql:
+            "INSERT INTO exerciseScript (exercise, script)" +
+            "VALUES (" +
+            "'" +
+            exercise +
+            "', '" +
+            "[]" +
+            `')`,
+        },
+        function (err, results) {
+          if (err) throw err;
+        }
+      );
+    } catch (err) {
+      console.error("There was an error ", err);
+    }
+  })
+
+  socket.on("delExercise", (exercise) => {
+    console.log(exercise);
+    try {
+      db.query(
+        {
+          sql:
+            "DELETE FROM exerciseScript WHERE exercise =" +
+            "'" +
+            exercise +
+            `'`,
+        },
+        function (err, results) {
+          if (err) throw err;
+        }
+      );
+    } catch (err) {
+      console.error("There was an error ", err);
+    }
   })
 
   socket.on("markExercise", function (user, file, name) {
