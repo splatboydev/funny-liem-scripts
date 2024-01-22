@@ -20,6 +20,8 @@ const WebSocket = require('ws');
 var exec = require('child_process').exec;
 const exerciseScripts = require("./scripts/criteria.js");
 const libre = require('libreoffice-convert');
+const esprima = require('esprima-next');
+const { fileURLToPath } = require("url");
 
 let token;
 let activeTest = [];
@@ -233,21 +235,41 @@ io.on("connection", async function (socket) {
     }
   });
 
-  socket.on("fetchReport", function () {
-    try {
-      db.query(
-        {
-          sql: "SELECT name, AdminTestWrong, AdminExerciseWrong FROM users",
-        },
-        function (err, results) {
-          if (err) throw err;
-
-          let result = Object.values(JSON.parse(JSON.stringify(results)));
-          socket.emit("returnReport", result);
-        }
-      );
-    } catch (err) {
-      console.error("There was an error ", err);
+  socket.on("getUser", function(req, condition, value, callback) {
+    let reqs = req.split(" ").join(",");
+    if (condition != "*") {
+      try {
+        db.query(
+          {
+            sql: `SELECT ${reqs} FROM users WHERE ${condition}=?`,
+            values: [value],
+          },
+          function (err, results) {
+            if (err) throw err;
+  
+            let result = Object.values(JSON.parse(JSON.stringify(results)));
+            callback(result);
+          }
+        );
+      } catch (err) {
+        console.error("There was an error ", err);
+      }
+    } else {
+      try {
+        db.query(
+          {
+            sql: `SELECT ${reqs} FROM users`,
+          },
+          function (err, results) {
+            if (err) throw err;
+  
+            let result = Object.values(JSON.parse(JSON.stringify(results)));
+            callback(result);
+          }
+        );
+      } catch (err) {
+        console.error("There was an error ", err);
+      }
     }
   });
 
@@ -287,6 +309,24 @@ io.on("connection", async function (socket) {
     }
   });
 
+  socket.on("getExTotal", function() {
+    try {
+      db.query(
+        {
+          sql: "SELECT lesson, total FROM exerciseTotal",
+        },
+        function (err, results) {
+          if (err) throw err;
+
+          let result = Object.values(JSON.parse(JSON.stringify(results)));
+          socket.emit("returnExTotal", result);
+        }
+      );
+    } catch (err) {
+      console.error("There was an error ", err);
+    }
+  });
+
   socket.on("mark", function (data) {
     total = 0;
 
@@ -312,25 +352,6 @@ io.on("connection", async function (socket) {
               total = total + parseInt(poopitypoop);
             }
           });
-        }
-      );
-    } catch (err) {
-      console.error("There was an error ", err);
-    }
-  });
-
-  socket.on("getgrades", function (data) {
-    try {
-      db.query(
-        {
-          sql: "SELECT grades FROM users WHERE name=?",
-          values: [data],
-        },
-        function (err, results) {
-          if (err) throw err;
-          if (results[0]) {
-            socket.emit("returngrades", results[0].grades);
-          }
         }
       );
     } catch (err) {
@@ -1372,7 +1393,6 @@ io.on("connection", async function (socket) {
       }
     }
   );
-
   try {
     if (token) {
       db.query(
@@ -2397,24 +2417,6 @@ io.on("connection", async function (socket) {
     }
   });
 
-  socket.on("getAnswers", function (user, callback) {
-    try {
-      db.query(
-        {
-          sql: "SELECT tempAnswer FROM users" + ` WHERE name = '` + user + `'`,
-        },
-        function (err, results) {
-          if (results[0]) {
-            callback(results[0].tempAnswer);
-          }
-          
-        }
-      );
-    } catch (err) {
-      console.log(err);
-    }
-  });
-
   socket.on("renamefile", function (filepath, newpath) {
     if (filepath.endsWith(".java")) {
       let classpath = filepath.slice(0, -4) + "class";
@@ -2431,32 +2433,7 @@ io.on("connection", async function (socket) {
     });
     socket.emit("refresh");
   });
-
-  socket.on("checkTest", function (user, callback) {
-    try {
-      db.query(
-        {
-          sql: "SELECT accessTest FROM users" + ` WHERE name = '` + user + `'`,
-        },
-        function (err, results) {
-          if (err) throw err;
-          if (results[0]) {
-            if (results[0].accessTest == undefined) {
-              callback("blank");
-            } else if (results[0].accessTest == "") {
-              callback("blank");
-            } else {
-              callback(results[0].accessTest);
-            }
-          } else {
-            callback("blank");
-          }
-        }
-      );
-    } catch (err) {
-      console.log(err);
-    }
-  });
+  
   socket.on("lesson", function (user, path, callback) {
     var str = path.substring(0, path.length - 4);
     var n = str.lastIndexOf(".");
@@ -2759,63 +2736,105 @@ io.on("connection", async function (socket) {
     }
   });
 
-  socket.on("getChecked", (data, student, exercise, callback) => {
-         
-    try {
-      db.query(
-        {
-          sql:
-            "SELECT script FROM exerciseScript" +
-            ` WHERE exercise = '` +
-            exercise +
-            `'`,
-        },
-        function (err, results) {
-          try {
-            let script = `
-            window.onload = async function () {
-              let socket = io();
-                
-              let scores = [];
-              let criteria = [];\n`;
-            
-            let scripts = JSON.parse(results[0].script);
-            
-            for (let i = 0; i < scripts.length; i++) {
-              
-              let required = scripts[i].Number + "<" + scripts[i].Tag + ">";
-              let optional = (scripts[i].Attribute != "*") ? " with " + scripts[i].Attribute + " == " + scripts[i].Value : "";
-              let criteria = required + optional;
-              
-              script += `\tcriteria.push("${criteria}");\n`;
-              script += exerciseScripts.ultimate(scripts[i]);
-              
-            }
+  socket.on("getChecked", async function(data, filepath, callback) {
+    let student = filepath.split("/")[3];
+    let exercise = filepath.slice(filepath.lastIndexOf("/") + 1, filepath.lastIndexOf("."));
+    exercise = exercise.toUpperCase();
 
-            script += `\n\tsocket.emit("getScore", "${student}", "${exercise}", scores, criteria);\n}`;
-      
-            fs.writeFile("./public/exercises/temp.js", script, (err) => {
-              if (err) {
-                console.log(err);
-              }
-              fs.writeFile("./public/exercises/temp.html", data, (err) => {
-                if (err) {
-                  console.log(err);
-                }
-                callback();
-              });
-            });
-            
-            console.log(script);
-          } catch (err) {
-            callback("error");
-          }
+    let pattern = /src.*\.html/g;
+    let found = data.match(pattern);
+    
+    if (found) {
+      for (let element of found) {
+        let filename;
+        if (element.indexOf("\/") > -1) {
+          filename = element.slice(element.lastIndexOf("\/") + 1);
+          data = data.replace(element.slice(element.indexOf("\"") + 1), filename);
+        } else {
+          filename = element.slice(element.indexOf("\"") + 1);
         }
-      );
-    } catch (err) {
-      console.error("There was an error ", err);
+        let src;
+        console.log(src);
+        if (element.indexOf("\/users\/") > -1) {
+          src = filepath.slice(0, filepath.indexOf("\/users\/")) + element.slice(element.indexOf("\/users\/"));
+        } else {
+          src = filepath.slice(0, filepath.lastIndexOf("\/") + 1) + filename;
+        }
+        console.log(filename);
+        console.log(src);
+        let dest = "./public/exercises/" + filename;
+        try {
+          await fs.promises.copyFile(src, dest);
+        } catch (err) {
+          console.error(`Error copying file from ${src} to ${dest}: ${err}`);
+          throw err;
+        }
+      }
     }
-  })
+  
+    try {
+      const results = await new Promise((resolve, reject) => {
+        db.query(
+          {
+            sql: "SELECT script FROM exerciseScript WHERE exercise = ?",
+            values: [exercise],
+          },
+          function (err, results) {
+            if (err) {
+              reject(err);
+            } else {
+              resolve(results);
+            }
+          }
+        );
+      });
+  
+      let script = `
+        window.onload = async function () {
+          let socket = io();
+          let scores = [];
+          let criteria = [];\n`;
+  
+      let scripts = JSON.parse(results[0].script);
+      for (let i = 0; i < scripts.length; i++) {
+        if (scripts[i].Type == "HTML") {
+          let required = scripts[i].Type + " " + scripts[i].Number + "<" + scripts[i].Tag + ">";
+          let optional = (scripts[i].Attribute != "*") ? " with " + scripts[i].Attribute + " == " + scripts[i].Value : "";
+          let criteriaItem = required + optional;
+          script += `\tcriteria.push("${criteriaItem}");\n`;
+          script += exerciseScripts.html(scripts[i]);
+        } else if (scripts[i].Type == "CSS") {
+          let required = scripts[i].Type + " <" + scripts[i].Tag + ">";
+          let optional = (scripts[i].Attribute != "*") ? " with " + scripts[i].Attribute + " == " + scripts[i].Value : "";
+          let criteriaItem = required + optional;
+          script += `\tcriteria.push("${criteriaItem}");\n`;
+          script += exerciseScripts.css(scripts[i]);
+        } else if (scripts[i].Type == "JS") {
+          let required = scripts[i].Type + " " + scripts[i].Key + " == " + scripts[i].Value;
+          let before = (scripts[i].Lkey != "*") ? " before: " + scripts[i].Lkey + " == " + scripts[i].Lvalue : "";
+          let after = (scripts[i].Nkey != "*") ? " after: " + scripts[i].Nkey + " == " + scripts[i].Nvalue : "";
+          let criteriaItem = "[" + required + after + before + "]";
+          script += `\tcriteria.push("${criteriaItem}");\n`;
+          script += exerciseScripts.js(scripts[i]);
+        }
+        
+      }
+  
+      script += `\t\n\tsocket.emit("getScore", "${student}", "${exercise}", scores, criteria);\n}`;
+  
+      await fs.promises.writeFile("./public/exercises/temp.js", script);
+      await fs.promises.writeFile("./public/exercises/temp.html", data);
+  
+      callback();
+    } catch (err) {
+      console.log(err);
+      callback("error");
+    }
+  });
+
+  socket.on("tokenize", (program, callback) => {
+    callback(esprima.tokenize(program));
+  });
 
   socket.on("getScore", (user, exercise, scores, criteria) => {
     let possible = criteria.length;
@@ -2863,8 +2882,8 @@ io.on("connection", async function (socket) {
               grade[i].Mark = sum;
               grade[i].Percent = percent;
               grade[i].Wrong = wrong;
+              grade[i].Possible = possible;
               reCheck = true;
-              console.log("yes");
             }
           }
           if (reCheck) {
@@ -2904,7 +2923,6 @@ io.on("connection", async function (socket) {
               '"}]';
             }
           }
-          console.log(objgradesAdmin);
           try {
             db.query(
               {
@@ -2930,10 +2948,82 @@ io.on("connection", async function (socket) {
     } catch (err) {
       console.error("There was an error ", err);
     }
-    
+    try {
+      db.query(
+        {
+          sql:
+            "SELECT exerciseGrades FROM users" + ` WHERE name = '` + user + `'`,
+        },
+        function (err, results) {
+          if (err) throw err;
+
+          reCheck = false;
+  
+          let newgrade = JSON.parse(results[0].exerciseGrades);
+          for (let i = 0; i < newgrade.length; i++) {
+            if (newgrade[i].Exercise == exercise) {
+              newgrade[i].Mark = sum;
+              newgrade[i].Possible = possible;
+              reCheck = true;
+            }
+          }
+  
+          if (!reCheck) {
+            if (results[0].exerciseGrades.length == 2) {
+              objgrades =
+                results[0].exerciseGrades.slice(0, -1) +
+                '{"Exercise":' +
+                '"' +
+                exercise +
+                '"' +
+                ',"Mark":' +
+                sum +
+                ',"Possible":' +
+                possible +
+                "}]";
+            } else {
+              objgrades =
+                results[0].exerciseGrades.slice(0, -1) +
+                ',{"Exercise":' +
+                '"' +
+                exercise +
+                '"' +
+                ',"Mark":' +
+                sum +
+                ',"Possible":' +
+                possible +
+                "}]";
+            }
+          } else {
+            objgrades = JSON.stringify(newgrade);
+          }
+          try {
+            db.query(
+              {
+                sql:
+                  "UPDATE users SET exerciseGrades =" +
+                  "'" +
+                  objgrades +
+                  "'" +
+                  ` WHERE name = '` +
+                  user +
+                  `'`,
+              },
+              function (err, results) {
+                if (err) throw err;
+              }
+            );
+          } catch (err) {
+            console.error("There was an error ", err);
+          }
+      });
+    } catch (err) {
+      console.error("There was an error ", err);
+    }
     socket.broadcast.emit("showScore", msg);
   });
-  socket.on("setScript", function (exercise, tag, number, attribute, value) {
+
+  socket.on("setScript", function (type, exercise, p1, p2, p3, p4, p5, p6) {
     try {
       db.query(
         {
@@ -2946,14 +3036,32 @@ io.on("connection", async function (socket) {
         function (err, results) {
           let exercise = results[0].exercise;
           let scripts = JSON.parse(results[0].script);
-          let instruction = {
-            Tag: tag,
-            Number: number,
-            Attribute: attribute,
-            Value: value
+          let final;
+          if (type == "HTML" || type == "CSS") {
+            let instruction = {
+              Type: type,
+              Tag: p1,
+              Number: p2,
+              Attribute: p3,
+              Value: p4,
+              Condition: p5
+            }
+            scripts.push(instruction);
+            final = JSON.stringify(scripts);
+          } else if (type == "JS") {
+            let instruction = {
+              Type: type,
+              Key: p1,
+              Value: p2,
+              Lkey: p3,
+              Lvalue: p4,
+              Nkey: p5,
+              Nvalue: p6
+            }
+            scripts.push(instruction);
+            final = JSON.stringify(scripts);
           }
-          scripts.push(instruction);
-          let final = JSON.stringify(scripts);
+
           try {
             db.query(
               {
@@ -2973,7 +3081,6 @@ io.on("connection", async function (socket) {
           } catch (err) {
             console.error("There was an error ", err);
           }
-          
         }
       );
     } catch (err) {
@@ -2995,12 +3102,7 @@ io.on("connection", async function (socket) {
           let scripts = JSON.parse(results[0].script);
           for (let i = 0; i < scripts.length; i++) {
             for (let j = 0; j < todel.length; j++) {
-              if (
-                scripts[i].Tag == todel[j].Tag &&
-                scripts[i].Number == todel[j].Number &&
-                scripts[i].Attribute == todel[j].Attribute &&
-                scripts[i].Value == todel[j].Value
-              ) {
+              if (JSON.stringify(scripts[i]) == JSON.stringify(todel[j])) {
                 let fscripts = scripts.slice(0, i);
                 let lscripts = scripts.slice(i + 1);
                 scripts = fscripts.concat(lscripts);
@@ -3033,7 +3135,8 @@ io.on("connection", async function (socket) {
     } catch (err) {
       console.error("There was an error ", err);
     }
-  })
+  });
+
   socket.on("addLesson", (exercise) => {
     console.log(exercise);
     try {
@@ -3055,7 +3158,7 @@ io.on("connection", async function (socket) {
     } catch (err) {
       console.error("There was an error ", err);
     }
-  })
+  });
 
   socket.on("delExercise", (exercise) => {
     console.log(exercise);
@@ -3075,7 +3178,7 @@ io.on("connection", async function (socket) {
     } catch (err) {
       console.error("There was an error ", err);
     }
-  })
+  });
 
   socket.on("markExercise", function (user, file, name) {
     wss.myFunction(user, file, name)
