@@ -21,9 +21,9 @@ Please do add more scripts.
 
 
 ## Badges
-![Static Badge](https://img.shields.io/badge/im%20fucking-tired-yellow?style=plastic)
+![Static Badge](https://img.shields.io/badge/im%20so-tired-yellow?style=plastic)
 ![Static Badge](https://img.shields.io/badge/difficulty-easy-red?style=plastic)
-![Static Badge](https://img.shields.io/badge/liem's%20code-shit%20quality-lightblue?style=plastic)
+![Static Badge](https://img.shields.io/badge/liem's%20code-bad%20quality-lightblue?style=plastic)
 
 ## License
 
