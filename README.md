@@ -8,6 +8,8 @@
 
 A compilation of scripts to use on wliem's website, LiemComputing.
 Please do add more scripts.
+
+Requires an account to be logged in to use (unless you inject socket.io and all the credentials yourself).
 ## Acknowledgements
 </a>
 
