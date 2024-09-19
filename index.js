@@ -16,12 +16,12 @@ const { promisify } = require("util");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const e = require("cors");
-const WebSocket = require('ws');
-var exec = require('child_process').exec;
+const WebSocket = require("ws");
+var exec = require("child_process").exec;
+const { spawn } = require("child_process");
 const exerciseScripts = require("./scripts/criteria.js");
-const libre = require('libreoffice-convert');
-const esprima = require('esprima-next');
-const { fileURLToPath } = require("url");
+const libre = require("libreoffice-convert");
+const esprima = require("esprima-next");
 
 let token;
 let activeTest = [];
@@ -39,8 +39,7 @@ const db = mysql.createConnection({
   database: process.env.DATABASE,
 });
 
-const wss = new WebSocket.Server({ port: 6969 })
-
+const wss = new WebSocket.Server({ port: 6969 });
 
 http.globalAgent.maxSockets = Infinity;
 https.globalAgent.maxSockets = Infinity;
@@ -96,6 +95,8 @@ let cppcontent;
 let cppc;
 let scratchcontent;
 let scratchc;
+let juliacontent;
+let juliac;
 
 function scandir() {
   webcontent = walk("./public/topics/Web");
@@ -123,35 +124,38 @@ function scandir() {
   fs.readdir("./public/topics/Scratch", (err, files) => {
     scratchc = files;
   });
+  juliacontent = walk("./public/topics/Julia");
+  juliac = "";
+  fs.readdir("./public/topics/Julia", (err, files) => {
+    juliac = files;
+  });
 }
 
 scandir();
 
-
-wss.on('connection', function connection(ws) {
-
-  console.log('Client connected')
+wss.on("connection", function connection(ws) {
+  console.log("Client connected");
 
   function sendToPJ(user, file, naam) {
-    ws.send(JSON.stringify({
-      name: user,
-      data: file,
-      filename: naam
-    }))
+    ws.send(
+      JSON.stringify({
+        name: user,
+        data: file,
+        filename: naam,
+      })
+    );
 
     console.log({
       name: user,
-      data: file
-    })
+      data: file,
+    });
   }
-  wss.myFunction = sendToPJ
+  wss.myFunction = sendToPJ;
 
-  ws.on('message', function incoming(message) {
-
-    let msg = JSON.parse(message)
+  ws.on("message", function incoming(message) {
+    let msg = JSON.parse(message);
     //  io.logExercise(msg[0].username, msg[0].msg)
-    console.log(JSON.parse(message))
-
+    console.log(JSON.parse(message));
   });
 
   ws.on("close", () => {
@@ -159,16 +163,15 @@ wss.on('connection', function connection(ws) {
   });
   ws.onerror = function () {
     console.log("Some Error occurred");
-  }
+  };
 });
 
 io.on("connection", async function (socket) {
-
   function logEx(user, msg) {
     socket.broadcast.emit("exLog", user, msg);
   }
 
-  io.logExercise = logEx
+  io.logExercise = logEx;
 
   socket.on("requestAlert", function () {
     if (alert != "null") {
@@ -235,7 +238,7 @@ io.on("connection", async function (socket) {
     }
   });
 
-  socket.on("getUser", function(req, condition, value, callback) {
+  socket.on("getUser", function (req, condition, value, callback) {
     let reqs = req.split(" ").join(",");
     if (condition != "*") {
       try {
@@ -246,7 +249,7 @@ io.on("connection", async function (socket) {
           },
           function (err, results) {
             if (err) throw err;
-  
+
             let result = Object.values(JSON.parse(JSON.stringify(results)));
             callback(result);
           }
@@ -262,7 +265,7 @@ io.on("connection", async function (socket) {
           },
           function (err, results) {
             if (err) throw err;
-  
+
             let result = Object.values(JSON.parse(JSON.stringify(results)));
             callback(result);
           }
@@ -274,24 +277,35 @@ io.on("connection", async function (socket) {
   });
 
   socket.on("getcourse", function (data, callback) {
-    if (data == "web") {
-      callback(webcontent, web);
-    } else if (data == "python") {
-      callback(pycontent, py);
-    } else if (data == "java") {
-      callback(javacontent, jc);
-    } else if (data == "cpp") {
-      callback(cppcontent, cppc);
-    } else if (data == "scratch") {
-      callback(scratchcontent, scratchc);
+    switch (data) {
+      case "web":
+        callback(webcontent, web);
+        break;
+      case "python":
+        callback(pycontent, py);
+        break;
+      case "java":
+        callback(javacontent, jc);
+        break;
+      case "cpp":
+        callback(cppcontent, cppc);
+        break;
+      case "scratch":
+        callback(scratchcontent, scratchc);
+        break;
+      case "julia":
+        callback(juliacontent, juliac);
+        break;
+      default:
+        console.log("Unknown data type");
+        break;
     }
   });
-  socket.on("getExercise", function(callback) {
+  socket.on("getExercise", function (callback) {
     try {
       db.query(
         {
-          sql:
-            "SELECT exercise, script FROM exerciseScript"
+          sql: "SELECT exercise, script FROM exerciseScript",
         },
         function (err, results) {
           let data = [];
@@ -309,7 +323,7 @@ io.on("connection", async function (socket) {
     }
   });
 
-  socket.on("getExTotal", function() {
+  socket.on("getExTotal", function () {
     try {
       db.query(
         {
@@ -626,6 +640,8 @@ io.on("connection", async function (socket) {
                     AdminTestWrong: "[]",
                     canDoTests: "false",
                     canDoLessons: "true",
+                    tempAnswer: "[]",
+                    AdminExerciseWrong: "[]",
                   },
                   (error, result) => {
                     let dir = `./public/users/${user}`;
@@ -657,6 +673,8 @@ io.on("connection", async function (socket) {
                     AdminTestWrong: "[]",
                     canDoTests: "false",
                     canDoLessons: "true",
+                    tempAnswer: "[]",
+                    AdminExerciseWrong: "[]",
                   },
                   (error, result) => {
                     let dir = `./public/users/${user}`;
@@ -854,18 +872,15 @@ io.on("connection", async function (socket) {
       db.query({
         sql: `SELECT * FROM ${test} WHERE q = ${question} `,
       }).on("result", function (row) {
-
-
-        let numberPortion
+        let numberPortion;
         let bruh = /\d/.test(row.a);
 
         if (bruh === true) {
           numberPortion = row.a.match(/\d+/)[0];
-          newAA = newans + numberPortion
+          newAA = newans + numberPortion;
         } else {
-          newAA = newans
+          newAA = newans;
         }
-
 
         try {
           db.query({
@@ -889,6 +904,7 @@ io.on("connection", async function (socket) {
         course == "java" ||
         course == "cpp" ||
         course == "scratch" ||
+        course == "julia" ||
         course == "root"
       ) {
         try {
@@ -954,6 +970,7 @@ io.on("connection", async function (socket) {
         course == "java" ||
         course == "cpp" ||
         course == "scratch" ||
+        course == "julia" ||
         course == "root"
       ) {
         try {
@@ -1019,6 +1036,7 @@ io.on("connection", async function (socket) {
         c == "java" ||
         c == "cpp" ||
         c == "python" ||
+        c == "julia" ||
         c == "scratch"
       ) {
         try {
@@ -1092,7 +1110,6 @@ io.on("connection", async function (socket) {
       }
     } else if (icommand[0] == "rl") {
     } else if (icommand[0] == "ctv") {
-
       test = icommand[1];
       question = icommand[2];
       newPoint = icommand[3];
@@ -1103,11 +1120,10 @@ io.on("connection", async function (socket) {
       // Checking if the parsing was successful
       if (!isNaN(parsedInt)) {
         try {
-
           db.query({
             sql: `SELECT * FROM ${test} WHERE q = ${question} `,
           }).on("result", function (row) {
-            oldQ = row.a
+            oldQ = row.a;
 
             let hasNumber = /\d/.test(row.a);
             // Extracting letter portion
@@ -1119,13 +1135,13 @@ io.on("connection", async function (socket) {
             if (bruh === true) {
               np = oldQ.match(/\d+/)[0];
             } else {
-              np = 1
+              np = 1;
             }
 
             if (newPoint != "1") {
-              newA = letterPortion + newPoint
+              newA = letterPortion + newPoint;
             } else {
-              newA = letterPortion
+              newA = letterPortion;
             }
 
             try {
@@ -1140,14 +1156,12 @@ io.on("connection", async function (socket) {
             } catch (err) {
               console.log(err);
             }
-
           });
-
         } catch (err) {
-          console.log(err)
+          console.log(err);
         }
       } else {
-        socket.emit("returncommand", `Error: ${newPoint} is not a valid int!`)
+        socket.emit("returncommand", `Error: ${newPoint} is not a valid int!`);
       }
     } else if (icommand[0] == "mtg") {
       userr = icommand[1];
@@ -1158,11 +1172,14 @@ io.on("connection", async function (socket) {
       if (userr && test && newPoint) {
         try {
           db.query({
-            sql: `SELECT grades,AdminTestWrong FROM users WHERE ` + "name='" + userr + "'"
+            sql:
+              `SELECT grades,AdminTestWrong FROM users WHERE ` +
+              "name='" +
+              userr +
+              "'",
           }).on("result", function (row) {
-
-            newg = JSON.parse(row.grades)
-            newgAdmin = JSON.parse(row.AdminTestWrong)
+            newg = JSON.parse(row.grades);
+            newgAdmin = JSON.parse(row.AdminTestWrong);
             for (var i = 0; i < newg.length; i++) {
               if (newg[i].Test == test) {
                 newg[i].Mark = newPoint;
@@ -1172,20 +1189,33 @@ io.on("connection", async function (socket) {
             for (var i = 0; i < newgAdmin.length; i++) {
               if (newgAdmin[i].Test == test) {
                 newgAdmin[i].Mark = newPoint;
-                newgAdmin[i].Percent = ((newPoint / newgAdmin[i].Possible) * "100").toFixed(1) + "%";
+                newgAdmin[i].Percent =
+                  ((newPoint / newgAdmin[i].Possible) * "100").toFixed(1) + "%";
                 break;
               }
             }
             try {
               db.query({
-                sql: `UPDATE users SET grades = '${JSON.stringify(newg)}' WHERE ` + "name='" + userr + "'",
+                sql:
+                  `UPDATE users SET grades = '${JSON.stringify(newg)}' WHERE ` +
+                  "name='" +
+                  userr +
+                  "'",
               }).on("result", function () {
                 try {
                   db.query({
-                    sql: `UPDATE users SET AdminTestWrong = '${JSON.stringify(newgAdmin)}' WHERE ` + "name='" + userr + "'",
+                    sql:
+                      `UPDATE users SET AdminTestWrong = '${JSON.stringify(
+                        newgAdmin
+                      )}' WHERE ` +
+                      "name='" +
+                      userr +
+                      "'",
                   }).on("result", function () {
                     socket.emit(
-                      "returncommand", `Updated mark for ${userr}'s ${test} test to ${newPoint}.`);
+                      "returncommand",
+                      `Updated mark for ${userr}'s ${test} test to ${newPoint}.`
+                    );
                   });
                 } catch (err) {
                   console.log(err);
@@ -1198,7 +1228,11 @@ io.on("connection", async function (socket) {
         } catch (err) {
           console.log(err);
         }
-      } else socket.emit("returncommand", "Error: One of the command arguments are missing!");
+      } else
+        socket.emit(
+          "returncommand",
+          "Error: One of the command arguments are missing!"
+        );
     } else if (icommand[0] == "cpn") {
       if (!icommand[1] || !icommand[2] || !icommand[3]) {
         socket.emit("returncommand", "Missing parameters");
@@ -1206,33 +1240,38 @@ io.on("connection", async function (socket) {
         let dirunit = icommand[1];
         let firstletter = dirunit.split("")[0];
         let alldir = fs.readdirSync(`./public/topics/`);
-        let dir = alldir.find(element => element.includes(firstletter.toUpperCase()));
+        let dir = alldir.find((element) =>
+          element.includes(firstletter.toUpperCase())
+        );
         if (
           dir == "Web" ||
           dir == "Java" ||
           dir == "Cpp" ||
           dir == "Scratch" ||
+          dir == "Julia" ||
           dir == "Python"
-          ) {
-            try {
-              let index = dirunit.split("").slice(1, 3).join("");
-              let allunit = fs.readdirSync(`./public/topics/${dir}`);
-              let unit = allunit.find(element => element.includes(index));
-              let filesss = walk(`./public/topics/${dir}/${unit}`);
-              let end = icommand.findIndex(element => element.includes(".pdf"));
-              let includes = icommand.slice(2, end + 1).join(" ");
-              let foundIndex = filesss.findIndex(element => element.includes(includes));
-              let found = filesss[foundIndex];
-              let endd = found.split("/");
-              endd[endd.length - 1] = icommand.slice(end + 1).join(" ");
-              let changed = endd.join("/");
-              fs.renameSync(found, changed, function(err) {
-                if (err) console.log('ERROR');
-              });
-              socket.emit("returncommand", changed);
-            } catch(err) {
-              socket.emit("returncommand", "Invalid file name");
-            }
+        ) {
+          try {
+            let index = dirunit.split("").slice(1, 3).join("");
+            let allunit = fs.readdirSync(`./public/topics/${dir}`);
+            let unit = allunit.find((element) => element.includes(index));
+            let filesss = walk(`./public/topics/${dir}/${unit}`);
+            let end = icommand.findIndex((element) => element.includes(".pdf"));
+            let includes = icommand.slice(2, end + 1).join(" ");
+            let foundIndex = filesss.findIndex((element) =>
+              element.includes(includes)
+            );
+            let found = filesss[foundIndex];
+            let endd = found.split("/");
+            endd[endd.length - 1] = icommand.slice(end + 1).join(" ");
+            let changed = endd.join("/");
+            fs.renameSync(found, changed, function (err) {
+              if (err) console.log("ERROR");
+            });
+            socket.emit("returncommand", changed);
+          } catch (err) {
+            socket.emit("returncommand", "Invalid file name");
+          }
         } else {
           socket.emit("returncommand", "Invalid course");
         }
@@ -1243,13 +1282,15 @@ io.on("connection", async function (socket) {
         let dirunit = icommand[1];
         let firstletter = dirunit.split("")[0];
         let alldir = fs.readdirSync(`./public/topics/`);
-        let dir = alldir.find(element => element.includes(firstletter.toUpperCase()));
+        let dir = alldir.find((element) =>
+          element.includes(firstletter.toUpperCase())
+        );
         let index = dirunit.split("").slice(1, 3).join("");
         let allunit = fs.readdirSync(`./public/topics/${dir}`);
-        let unit = allunit.find(element => element.includes(index));
+        let unit = allunit.find((element) => element.includes(index));
         let path = `./public/topics/${dir}/${unit}`;
         socket.emit("returncommand", path);
-      } catch(err) {
+      } catch (err) {
         socket.emit("returncommand", err);
       }
     } else if (icommand[0] == "rf") {
@@ -1257,34 +1298,46 @@ io.on("connection", async function (socket) {
         let dirunit = icommand[1];
         let firstletter = dirunit.split("")[0];
         let alldir = fs.readdirSync(`./public/topics/`);
-        let dir = alldir.find(element => element.includes(firstletter.toUpperCase()));
+        let dir = alldir.find((element) =>
+          element.includes(firstletter.toUpperCase())
+        );
         let index = dirunit.split("").slice(1, 3).join("");
         let allunit = fs.readdirSync(`./public/topics/${dir}`);
-        let unit = allunit.find(element => element.includes(index));
+        let unit = allunit.find((element) => element.includes(index));
 
         let filesss = walk(`./public/topics/${dir}/${unit}`);
         let end = icommand.length;
         let includes = icommand.slice(2, end).join(" ");
-        let foundIndex = filesss.findIndex(element => element.includes(includes));
-        
+        let foundIndex = filesss.findIndex((element) =>
+          element.includes(includes)
+        );
+
         let enterpath = filesss[foundIndex];
 
         fs.unlinkSync(enterpath);
         let filename = enterpath.slice(enterpath.lastIndexOf("/") + 1);
-        socket.emit("returncommand", "\"" + filename + "\"" + " is deleted.");
+        socket.emit("returncommand", '"' + filename + '"' + " is deleted.");
       } catch (err) {
         socket.emit("returncommand", "Invalid input");
       }
-      
     } else if (icommand[0] == "rep") {
       socket.emit("returncommand", "Loading...");
       let dir = icommand[1];
       let newpassword = icommand[2];
-      
-      if (dir == "web" || dir == "cpp" || dir == "scratch" || dir == "python" || dir == "java") {
+
+      if (
+        dir == "web" ||
+        dir == "cpp" ||
+        dir == "scratch" ||
+        dir == "python" ||
+        dir == "julia" ||
+        dir == "java"
+      ) {
         if (newpassword != "" && newpassword.length < 9) {
           db.query(
-            "SELECT `password` FROM `pdfPassword` WHERE `topics` = '" + dir + "'",
+            "SELECT `password` FROM `pdfPassword` WHERE `topics` = '" +
+              dir +
+              "'",
             (error, result) => {
               if (error) {
                 console.error("Database error:", error);
@@ -1298,7 +1351,7 @@ io.on("connection", async function (socket) {
                   function executeQpdf1Async(password, inputPath, outputPath) {
                     return new Promise((resolve, reject) => {
                       let cmd = `qpdf --decrypt --password=${password} "${inputPath}" "${outputPath}"`;
-                     
+
                       exec(cmd, (err) => {
                         if (err) {
                           reject(err);
@@ -1311,7 +1364,7 @@ io.on("connection", async function (socket) {
                   function executeQpdf2Async(inputPath, outputPath) {
                     return new Promise((resolve, reject) => {
                       let cmd = `qpdf --encrypt ${newpassword} ${newpassword} 40 -- "${inputPath}" "${outputPath}"`;
-                     
+
                       exec(cmd, (err) => {
                         if (err) {
                           reject(err);
@@ -1321,7 +1374,7 @@ io.on("connection", async function (socket) {
                       });
                     });
                   }
-    
+
                   for (let i = 0; arr[i]; i++) {
                     let parts = arr[i].split("/");
                     let fileName = parts[parts.length - 1];
@@ -1329,48 +1382,64 @@ io.on("connection", async function (socket) {
                     let enterpath = `./public/topics/${dir}/${unit}/${fileName}`;
                     let decpdf = `./public/topics/${dir}/${unit}/decrypted${i}.pdf`;
                     let encpdf = `./public/topics/${dir}/${unit}/encrypted${i}.pdf`;
-                    
+
                     executeQpdf1Async(password, enterpath, decpdf)
-                    .then(() => {
-                      return fs.promises.unlink(enterpath);
-                    })
-                    .then(() => {
-                      return executeQpdf2Async(decpdf, encpdf);
-                    })
-                    .then(() => {
-                      return fs.promises.unlink(decpdf);
-                    })
-                    .then(() => {
-                      return fs.promises.rename(encpdf, enterpath);
-                    })
-                    .then(() => {
-                      socket.emit("returncommand", i);
-                    })
-                    .catch((err) => {
-                      socket.emit("returncommand", `${enterpath}`);
-                      console.log(err);
-                    })
+                      .then(() => {
+                        return fs.promises.unlink(enterpath);
+                      })
+                      .then(() => {
+                        return executeQpdf2Async(decpdf, encpdf);
+                      })
+                      .then(() => {
+                        return fs.promises.unlink(decpdf);
+                      })
+                      .then(() => {
+                        return fs.promises.rename(encpdf, enterpath);
+                      })
+                      .then(() => {
+                        socket.emit("returncommand", i);
+                      })
+                      .catch((err) => {
+                        socket.emit("returncommand", `${enterpath}`);
+                        console.log(err);
+                      });
                   }
                 }
-                
               }
-              
             }
           );
         } else {
-          socket.emit("returncommand", "Length muse be less than nine characters and more than zero characters");
+          socket.emit(
+            "returncommand",
+            "Length muse be less than nine characters and more than zero characters"
+          );
         }
       } else {
         socket.emit("returncommand", "Invalid topic");
       }
-      if (dir == "web" || dir == "cpp" || dir == "scratch" || dir == "python" || dir == "java") {
+      if (
+        dir == "web" ||
+        dir == "cpp" ||
+        dir == "scratch" ||
+        dir == "python" ||
+        dir == "julia" ||
+        dir == "java"
+      ) {
         if (newpassword != "" && newpassword.length < 9) {
           db.query({
-            sql: "UPDATE `pdfPassword` SET `password`='"+ newpassword +"' WHERE topics='" + dir +"'",
+            sql:
+              "UPDATE `pdfPassword` SET `password`='" +
+              newpassword +
+              "' WHERE topics='" +
+              dir +
+              "'",
           });
           scandir();
         } else {
-          socket.emit("returncommand", "Length muse be less than nine characters and more than zero characters");
+          socket.emit(
+            "returncommand",
+            "Length muse be less than nine characters and more than zero characters"
+          );
         }
       } else {
         socket.emit("returncommand", "Invalid topic");
@@ -1380,19 +1449,23 @@ io.on("connection", async function (socket) {
       socket.emit("returncommand", value);
     }
   });
-  
-  db.query(
-    "SELECT `password` FROM `pdfPassword`",
-    (error, result) => {
-      if (error) {
-        console.error("Database error:", error);
-      } else {
-        if (result.length > 0) {
-          socket.emit("gibPDFPass", {web: result[0].password, scratch: result[1].password, python: result[2].password, cpp: result[3].password, java: result[4].password});
-        }
+
+  db.query("SELECT `password` FROM `pdfPassword`", (error, result) => {
+    if (error) {
+      console.error("Database error:", error);
+    } else {
+      if (result.length > 0) {
+        socket.emit("gibPDFPass", {
+          web: result[0].password,
+          scratch: result[1].password,
+          python: result[2].password,
+          cpp: result[3].password,
+          java: result[4].password,
+          julia: result[5].password,
+        });
       }
     }
-  );
+  });
   try {
     if (token) {
       db.query(
@@ -1447,6 +1520,8 @@ io.on("connection", async function (socket) {
                   AdminTestWrong: "[]",
                   canDoTests: "false",
                   canDoLessons: "true",
+                  tempAnswer: "[]",
+                  AdminExerciseWrong: "[]",
                 },
                 (error, result) => {
                   let dir = `./public/users/${name}`;
@@ -1474,6 +1549,8 @@ io.on("connection", async function (socket) {
                   accessUnit: `${accessUnits}`,
                   grades: "[]",
                   AdminTestWrong: "[]",
+                  tempAnswer: "[]",
+                  AdminExerciseWrong: "[]",
                 },
                 (error, result) => {
                   let dir = `./public/users/${name}`;
@@ -1628,7 +1705,7 @@ io.on("connection", async function (socket) {
 
   let receivedChunks = [];
 
-  socket.on('dataChunk', ({data, path}) => {
+  socket.on("dataChunk", ({ data, path }) => {
     receivedChunks.push(data);
     if (receivedChunks.length == 30) {
       if (fs.existsSync(path) === false) {
@@ -1653,8 +1730,9 @@ io.on("connection", async function (socket) {
           });
         }
         function convertAsync(inputPath, outputPath) {
-          return fs.promises.readFile(inputPath)
-            .then(docxBuf => {
+          return fs.promises
+            .readFile(inputPath)
+            .then((docxBuf) => {
               return new Promise((resolve, reject) => {
                 libre.convert(docxBuf, ".pdf", undefined, (err, pdfBuf) => {
                   if (err) {
@@ -1665,14 +1743,14 @@ io.on("connection", async function (socket) {
                 });
               });
             })
-            .then(pdfBuf => {
+            .then((pdfBuf) => {
               return fs.promises.writeFile(outputPath, pdfBuf);
             });
         }
         function executeQpdfAsync(inputPath, outputPath) {
           return new Promise((resolve, reject) => {
             const cmd = `qpdf --encrypt ${process.env.PDF_PASSWORD} ${process.env.PDF_PASSWORD} 40 -- "${inputPath}" "${outputPath}"`;
-           
+
             exec(cmd, (err) => {
               if (err) {
                 reject(err);
@@ -1723,6 +1801,7 @@ io.on("connection", async function (socket) {
       filetype == ".py" ||
       filetype == ".java" ||
       filetype == ".cpp" ||
+      filetype == ".jl" ||
       filetype == ".png" ||
       filetype == ".jpeg" ||
       filetype == ".gif" ||
@@ -1792,7 +1871,7 @@ io.on("connection", async function (socket) {
     scandir();
     callback("Rescanned PDF directories, Courses should be refreshed now.");
   });
-  
+
   socket.on("makedir", function (dir, callback) {
     let check = dir.substring(1);
     if (fs.existsSync(dir) === true) {
@@ -1806,6 +1885,7 @@ io.on("connection", async function (socket) {
         filetype == ".py" ||
         filetype == ".java" ||
         filetype == ".cpp" ||
+        filetype == ".jl" ||
         filetype == ".h"
       ) {
         if (filetype == ".java") {
@@ -1828,8 +1908,6 @@ io.on("connection", async function (socket) {
   });
 
   socket.on("python", function (filepath, user) {
-    const { spawn } = require("child_process");
-
     let thingy = 0;
     let parts = filepath.split("/");
     let namee = parts[parts.length - 1];
@@ -1896,8 +1974,6 @@ io.on("connection", async function (socket) {
   });
 
   socket.on("java", function (filepath) {
-    const { spawn } = require("child_process");
-
     function javac() {
       return new Promise((resolve) => {
         const javac = spawn("javac " + filepath, { shell: true });
@@ -1969,12 +2045,12 @@ io.on("connection", async function (socket) {
   });
 
   socket.on("cpp", function (filepath) {
-    const { spawn } = require("child_process");
-
     var gpp = filepath.slice(0, -4);
     function gcc() {
       return new Promise((resolve) => {
-        const gcc = spawn("g++ -o " + gpp + " " + filepath, { shell: "/bin/bash" });
+        const gcc = spawn("g++ -o " + gpp + " " + filepath, {
+          shell: "/bin/bash",
+        });
         let dontrun = false;
         gcc.stdout.on("data", function (data) {
           socket.emit("output", data.toString());
@@ -1988,12 +2064,12 @@ io.on("connection", async function (socket) {
         gcc.on("error", (error) => {
           console.log(`error: ${error.message}`);
           socket.emit("output", error.toString());
-          dontrun = true
+          dontrun = true;
         });
 
         gcc.on("close", (code) => {
           socket.emit("addCode");
-          socket.emit("dontRun")
+          socket.emit("dontRun");
           if (dontrun == false) resolve("resolved");
         });
       });
@@ -2006,7 +2082,10 @@ io.on("connection", async function (socket) {
       var fileee = filepath.slice(lastIndex + 1).slice(0, -4);
       before = filepath.slice(0, lastIndex);
 
-      const cpp = spawn("LD_PRELOAD=/home/liemcomputing/EasySandbox/EasySandbox.so ./" + fileee, { shell: "/bin/bash", cwd: before });
+      const cpp = spawn(
+        "LD_PRELOAD=/home/liemcomputing/EasySandbox/EasySandbox.so ./" + fileee,
+        { shell: "/bin/bash", cwd: before }
+      );
 
       socket.on("userinput", function (input) {
         cpp.stdin.setEncoding("utf-8");
@@ -2042,6 +2121,72 @@ io.on("connection", async function (socket) {
     asyncCall();
   });
 
+  socket.on("julia", function (filepath, user) {
+    let thingy = 0;
+    let parts = filepath.split("/");
+    let namee = parts[parts.length - 1];
+
+    function shield() {
+      return new Promise((resolve) => {
+        let shield;
+        let code;
+        let script;
+        fs.readFile("./shield/shield.jl", "utf8", function (err, data) {
+          shield = data;
+          fs.readFile(filepath, "utf8", function (err, data) {
+            code = data;
+            script = shield + "\n\n" + code;
+            fs.writeFile(`./temp/${user}${namee}`, script, (err) => {
+              if (err) {
+                console.log(err);
+              }
+              resolve("resolved");
+            });
+          });
+        });
+      });
+    }
+    async function asyncCall() {
+      const result = await shield();
+      const python = spawn("/home/liemcomputing/julia-1.10.4/bin/julia " + `./temp/${user}${namee}`, {
+        shell: true,
+      });
+      socket.emit("Program Status", "active");
+      socket.on("userinput", function (input) {
+        python.stdin.setEncoding("utf-8");
+        python.stdin.write(input + "\n");
+        python.stdout.pipe(process.stdout);
+      });
+      socket.on("kill", function (callback) {
+        python.kill();
+        thingy = 1;
+        callback("lol");
+      });
+      python.stdout.on("data", function (data) {
+        socket.emit("output", data.toString());
+      });
+      python.stderr.on("data", (data) => {
+        if (thingy != 1) {
+          socket.emit("output", data.toString());
+        }
+      });
+      python.on("error", (error) => {
+        socket.emit("output", error.toString());
+      });
+      python.on("close", (code) => {
+        if (thingy != 1) {
+          socket.emit("output", "[Exit Code 0]");
+        }
+        fs.rmSync(`./temp/${user}${namee}`, { recursive: true }, (err) => {
+          if (err) {
+            throw err;
+          }
+        });
+      });
+    }
+    asyncCall();
+  });
+
   socket.on(
     "marktest",
     function (testName, studentResponse, student, unit, check, callback) {
@@ -2058,11 +2203,6 @@ io.on("connection", async function (socket) {
       let objgradesAdmin = "";
       let retest = false;
 
-
-
-
-
-
       try {
         db.query(
           {
@@ -2071,13 +2211,9 @@ io.on("connection", async function (socket) {
           function (err, results) {
             if (err) throw err;
 
-            console.log(results[0].accessTest, testName, check)
+            console.log(results[0].accessTest, testName, check);
 
             if (results[0].accessTest == check) {
-
-
-
-
               try {
                 db.query(
                   {
@@ -2099,7 +2235,9 @@ io.on("connection", async function (socket) {
                   function (err, results) {
                     if (err) throw err;
 
-                    marksbe4 = Object.values(JSON.parse(JSON.stringify(results)));
+                    marksbe4 = Object.values(
+                      JSON.parse(JSON.stringify(results))
+                    );
                     for (let i = 0; i < marksbe4.length; i++) {
                       checking = marksbe4[i].a
                         .toLowerCase()
@@ -2126,14 +2264,16 @@ io.on("connection", async function (socket) {
                         if (answer == checking) {
                           score = score + 1;
                         } else if (answer != checking) {
-                          wrong = wrong + " " + marksbe4[i].q + ":[" + answer + "]";
+                          wrong =
+                            wrong + " " + marksbe4[i].q + ":[" + answer + "]";
                         }
                       } else {
                         total = total + parseInt(poopitypoop);
                         if (answer == checking) {
                           score = score + parseInt(poopitypoop);
                         } else if (answer != checking) {
-                          wrong = wrong + " " + marksbe4[i].q + ":[" + answer + "]";
+                          wrong =
+                            wrong + " " + marksbe4[i].q + ":[" + answer + "]";
                         }
                       }
                     }
@@ -2150,7 +2290,10 @@ io.on("connection", async function (socket) {
                 db.query(
                   {
                     sql:
-                      "SELECT grades FROM users" + ` WHERE name = '` + usernamee + `'`,
+                      "SELECT grades FROM users" +
+                      ` WHERE name = '` +
+                      usernamee +
+                      `'`,
                   },
                   function (err, results) {
                     if (err) throw err;
@@ -2164,7 +2307,7 @@ io.on("connection", async function (socket) {
                     }
 
                     if (!retest) {
-                      if (results[0].grades.length == 2 ) {
+                      if (results[0].grades.length == 2) {
                         objgrades =
                           results[0].grades.slice(0, -1) +
                           '{"Test":' +
@@ -2243,7 +2386,8 @@ io.on("connection", async function (socket) {
                         },
                         function (err, results) {
                           if (err) throw err;
-                          let percent = ((score / total) * "100").toFixed(1) + "%";
+                          let percent =
+                            ((score / total) * "100").toFixed(1) + "%";
 
                           let newAdmin = JSON.parse(results[0].AdminTestWrong);
                           for (let i = 0; i < newAdmin.length; i++) {
@@ -2256,7 +2400,10 @@ io.on("connection", async function (socket) {
                           }
 
                           if (!retest) {
-                            if (results[0].AdminTestWrong.length == 2 && !retest) {
+                            if (
+                              results[0].AdminTestWrong.length == 2 &&
+                              !retest
+                            ) {
                               objgradesAdmin =
                                 results[0].AdminTestWrong.slice(0, -1) +
                                 '{"Test":' +
@@ -2347,7 +2494,9 @@ io.on("connection", async function (socket) {
                       `SELECT accessUnit FROM users WHERE name = '${usernamee}'`,
                       (error, result) => {
                         if (result[0]) {
-                          if (result[0].accessUnit.slice(-2) == tests.slice(-2)) {
+                          if (
+                            result[0].accessUnit.slice(-2) == tests.slice(-2)
+                          ) {
                             try {
                               db.query(
                                 {
@@ -2433,7 +2582,7 @@ io.on("connection", async function (socket) {
     });
     socket.emit("refresh");
   });
-  
+
   socket.on("lesson", function (user, path, callback) {
     var str = path.substring(0, path.length - 4);
     var n = str.lastIndexOf(".");
@@ -2501,7 +2650,7 @@ io.on("connection", async function (socket) {
         }
       });
 
-      query3.on("result", function (row) { });
+      query3.on("result", function (row) {});
     } catch (err) {
       console.log(err);
     }
@@ -2601,7 +2750,7 @@ io.on("connection", async function (socket) {
             if (results[0]) {
               socket.emit("sql-response", results);
             }
-          } catch (err) { }
+          } catch (err) {}
         }
       );
 
@@ -2634,7 +2783,7 @@ io.on("connection", async function (socket) {
           if (results[0]) {
             socket.emit("gotUsers", results);
           }
-        } catch (err) { }
+        } catch (err) {}
       }
     );
 
@@ -2736,29 +2885,48 @@ io.on("connection", async function (socket) {
     }
   });
 
-  socket.on("getChecked", async function(data, filepath, callback) {
+  socket.on("getChecked", async function (data, filepath, callback) {
+    // Delete all files in exercises
+    try {
+      const files = await fs.promises.readdir("./public/exercises/");
+      for (const file of files)
+        await fs.promises.unlink("./public/exercises/" + file);
+    } catch (err) {
+      console.error(err);
+    }
+
+    // Initialize variables
     let student = filepath.split("/")[3];
-    let exercise = filepath.slice(filepath.lastIndexOf("/") + 1, filepath.lastIndexOf("."));
+    let exercise = filepath.slice(
+      filepath.lastIndexOf("/") + 1,
+      filepath.lastIndexOf(".")
+    );
     exercise = exercise.toUpperCase();
 
-    let pattern = /src.*\.html/g;
-    let found = data.match(pattern);
-    
-    if (found) {
-      for (let element of found) {
+    // Check if there are any frames
+    let framePattern = /src.*\.html/g;
+    let frames = data.match(framePattern);
+
+    if (frames) {
+      for (let element of frames) {
         let filename;
-        if (element.indexOf("\/") > -1) {
-          filename = element.slice(element.lastIndexOf("\/") + 1);
-          data = data.replace(element.slice(element.indexOf("\"") + 1), filename);
+        if (element.indexOf("/") > -1) {
+          filename = element.slice(element.lastIndexOf("/") + 1);
+          data = data.replace(
+            element.slice(element.indexOf('"') + 1),
+            filename
+          );
         } else {
-          filename = element.slice(element.indexOf("\"") + 1);
+          filename = element.slice(element.indexOf('"') + 1);
         }
         let src;
         console.log(src);
-        if (element.indexOf("\/users\/") > -1) {
-          src = filepath.slice(0, filepath.indexOf("\/users\/")) + element.slice(element.indexOf("\/users\/"));
+        if (element.indexOf("/users/") > -1) {
+          src =
+            filepath.slice(0, filepath.indexOf("/users/")) +
+            element.slice(element.indexOf("/users/"));
         } else {
-          src = filepath.slice(0, filepath.lastIndexOf("\/") + 1) + filename;
+          src = filepath.slice(0, filepath.lastIndexOf("/") + 1) + filename;
         }
         console.log(filename);
         console.log(src);
@@ -2767,11 +2935,44 @@ io.on("connection", async function (socket) {
           await fs.promises.copyFile(src, dest);
         } catch (err) {
           console.error(`Error copying file from ${src} to ${dest}: ${err}`);
-          throw err;
         }
       }
     }
-  
+
+    // Check if there are css files
+    let cssPattern = /href.*\.css/g;
+    let css = data.match(cssPattern);
+
+    if (css) {
+      for (let element of css) {
+        let filename;
+        if (element.indexOf("/") > -1) {
+          filename = element.slice(element.lastIndexOf("/") + 1);
+          data = data.replace(
+            element.slice(element.indexOf('"') + 1),
+            filename
+          );
+        } else {
+          filename = element.slice(element.indexOf('"') + 1);
+        }
+        let src;
+        if (element.indexOf("/users/") > -1) {
+          src =
+            filepath.slice(0, filepath.indexOf("/users/")) +
+            element.slice(element.indexOf("/users/"));
+        } else {
+          src = filepath.slice(0, filepath.lastIndexOf("/") + 1) + filename;
+        }
+        let dest = "./public/exercises/" + filename;
+        try {
+          await fs.promises.copyFile(src, dest);
+        } catch (err) {
+          console.error(`Error copying file from ${src} to ${dest}: ${err}`);
+        }
+      }
+    }
+
+    // Write temp.js
     try {
       const results = await new Promise((resolve, reject) => {
         db.query(
@@ -2788,43 +2989,76 @@ io.on("connection", async function (socket) {
           }
         );
       });
-  
+
       let script = `
         window.onload = async function () {
+          function standardize_color(str){
+            var ctx = document.createElement('canvas').getContext('2d');
+            ctx.fillStyle = str;
+            return ctx.fillStyle;
+          }
           let socket = io();
           let scores = [];
           let criteria = [];\n`;
-  
+
       let scripts = JSON.parse(results[0].script);
       for (let i = 0; i < scripts.length; i++) {
         if (scripts[i].Type == "HTML") {
-          let required = scripts[i].Type + " " + scripts[i].Number + "<" + scripts[i].Tag + ">";
-          let optional = (scripts[i].Attribute != "*") ? " with " + scripts[i].Attribute + " == " + scripts[i].Value : "";
+          let required =
+            scripts[i].Type +
+            " " +
+            scripts[i].Number +
+            "<" +
+            scripts[i].Tag +
+            ">";
+          let optional =
+            scripts[i].Attribute != "*"
+              ? " with " + scripts[i].Attribute + " == " + scripts[i].Value
+              : "";
           let criteriaItem = required + optional;
-          script += `\tcriteria.push("${criteriaItem}");\n`;
+          script += `\tcriteria.push('${criteriaItem}');\n`;
           script += exerciseScripts.html(scripts[i]);
         } else if (scripts[i].Type == "CSS") {
-          let required = scripts[i].Type + " <" + scripts[i].Tag + ">";
-          let optional = (scripts[i].Attribute != "*") ? " with " + scripts[i].Attribute + " == " + scripts[i].Value : "";
-          let criteriaItem = required + optional;
-          script += `\tcriteria.push("${criteriaItem}");\n`;
+          let final = "";
+          if (scripts[i].Pseudo == "*") {
+            final += scripts[i].Type + " <" + scripts[i].Selector + ">";
+          } else {
+            final += scripts[i].Type + " <" + scripts[i].Selector + scripts[i].Pseudo + ">";
+          }
+          final += " with " + scripts[i].Property + " == " + scripts[i].Value;
+          if (scripts[i].Condition != "*") {
+            final += " if " + scripts[i].Condition;
+          }
+          script += `\tcriteria.push('${final}');\n`;
           script += exerciseScripts.css(scripts[i]);
         } else if (scripts[i].Type == "JS") {
-          let required = scripts[i].Type + " " + scripts[i].Key + " == " + scripts[i].Value;
-          let before = (scripts[i].Lkey != "*") ? " before: " + scripts[i].Lkey + " == " + scripts[i].Lvalue : "";
-          let after = (scripts[i].Nkey != "*") ? " after: " + scripts[i].Nkey + " == " + scripts[i].Nvalue : "";
+          let required =
+            scripts[i].Type + " " + scripts[i].Key + " == " + scripts[i].Value;
+          let before =
+            scripts[i].Lkey != "*"
+              ? " before: " + scripts[i].Lkey + " == " + scripts[i].Lvalue
+              : "";
+          let after =
+            scripts[i].Nkey != "*"
+              ? " after: " + scripts[i].Nkey + " == " + scripts[i].Nvalue
+              : "";
           let criteriaItem = "[" + required + after + before + "]";
-          script += `\tcriteria.push("${criteriaItem}");\n`;
+          script += `\tcriteria.push('${criteriaItem}');\n`;
           script += exerciseScripts.js(scripts[i]);
+        } else if (scripts[i].Type == "selfmark") {
+          let criteriaItem = "selfmark";
+          script += `\tcriteria.push('${criteriaItem}');\n`;
+          script += exerciseScripts.selfmark(scripts[i]);
         }
-        
       }
-  
+
       script += `\t\n\tsocket.emit("getScore", "${student}", "${exercise}", scores, criteria);\n}`;
-  
+
+      // Create temp.html and temp.js
+
       await fs.promises.writeFile("./public/exercises/temp.js", script);
       await fs.promises.writeFile("./public/exercises/temp.html", data);
-  
+
       callback();
     } catch (err) {
       console.log(err);
@@ -2832,30 +3066,80 @@ io.on("connection", async function (socket) {
     }
   });
 
+  socket.on("checkALL", async function (filepath, callback) {
+    let dir = filepath.slice(0, filepath.lastIndexOf("/"));
+    let files = walk(dir);
+    let all = [];
+
+    let exercises = await new Promise((resolve, reject) => {
+      db.query(
+        {
+          sql: "SELECT exercise FROM exerciseScript",
+        },
+        function (err, results) {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(results);
+          }
+        }
+      );
+    });
+    exercises = exercises.map((element) => {
+      return element.exercise + ".html";
+    });
+    files = files.filter((element) => {
+      let filename = element.slice(element.lastIndexOf("/") + 1);
+      filename = filename.toLowerCase();
+      if (filename === "index.html") {
+        filename = element.slice(0, element.lastIndexOf("/"));
+        filename = filename.slice(filename.lastIndexOf("/") + 1) + ".html";
+      }
+      filename = filename.replace(/e/g, "E");
+      return exercises.includes(filename);
+    });
+    for (let i = 0; i < files.length; i++) {
+      let data = await fs.promises.readFile(files[i], "utf8");
+      all.push(data);
+      all.push(files[i]);
+    }
+    callback(all);
+  });
+
   socket.on("tokenize", (program, callback) => {
     callback(esprima.tokenize(program));
   });
 
   socket.on("getScore", (user, exercise, scores, criteria) => {
-    let possible = criteria.length;
+    let possibles = criteria.map((element) => {
+      if (element == "selfmark") {
+        return 10;
+      } else {
+        return element.split("AND").length;
+      }
+    });
+    let total = 0;
     let sum = 0;
     let msg = "";
     let wrong = [];
     let percent;
     let reCheck = false;
 
-    scores.forEach(score => {
+    possibles.forEach((possible) => {
+      total += possible;
+    });
+    scores.forEach((score) => {
       sum += score;
-    })
+    });
 
     msg = `Marking Criteria(${exercise})\n`;
-    for (let i = 0; i < possible; i++) {
-      msg += criteria[i] + ": " + scores[i] + "/1" + "\n";
+    for (let i = 0; i < criteria.length; i++) {
+      msg += criteria[i] + ": " + scores[i] + "/" + possibles[i] + "\n";
     }
-    msg += `Total score: ${sum}/${possible}`;
-    
-    for (let i = 0; i < possible; i++) {
-      if (scores[i] == 0) {
+    msg += `Total score: ${sum}/${total}`;
+
+    for (let i = 0; i < scores.length; i++) {
+      if (scores[i] != possibles[i]) {
         wrong.push(criteria[i]);
       }
     }
@@ -2863,7 +3147,7 @@ io.on("connection", async function (socket) {
       wrong.push("N/A");
     }
 
-    percent = ((sum / possible) * "100").toFixed(1) + "%";
+    percent = ((sum / total) * "100").toFixed(1) + "%";
 
     try {
       db.query(
@@ -2875,14 +3159,13 @@ io.on("connection", async function (socket) {
             `'`,
         },
         function (err, results) {
-
           let grade = JSON.parse(results[0].AdminExerciseWrong);
           for (let i = 0; i < grade.length; i++) {
             if (grade[i].Exercise == exercise) {
               grade[i].Mark = sum;
               grade[i].Percent = percent;
               grade[i].Wrong = wrong;
-              grade[i].Possible = possible;
+              grade[i].Possible = total;
               reCheck = true;
             }
           }
@@ -2891,36 +3174,36 @@ io.on("connection", async function (socket) {
           } else {
             if (results[0].AdminExerciseWrong.length == 2) {
               objgradesAdmin =
-              results[0].AdminExerciseWrong.slice(0, -1) +
-              '{"Exercise":' +
-              '"' +
-              exercise +
-              '"' +
-              ',"Mark":' +
-              sum +
-              ',"Possible":' +
-              possible +
-              ',"Percent":"' +
-              percent +
-              '","Wrong":"' +
-              wrong +
-              '"}]';
+                results[0].AdminExerciseWrong.slice(0, -1) +
+                '{"Exercise":' +
+                '"' +
+                exercise +
+                '"' +
+                ',"Mark":' +
+                sum +
+                ',"Possible":' +
+                total +
+                ',"Percent":"' +
+                percent +
+                '","Wrong":"' +
+                wrong +
+                '"}]';
             } else {
               objgradesAdmin =
-              results[0].AdminExerciseWrong.slice(0, -1) +
-              ',{"Exercise":' +
-              '"' +
-              exercise +
-              '"' +
-              ',"Mark":' +
-              sum +
-              ',"Possible":' +
-              possible +
-              ',"Percent":"' +
-              percent +
-              '","Wrong":"' +
-              wrong +
-              '"}]';
+                results[0].AdminExerciseWrong.slice(0, -1) +
+                ',{"Exercise":' +
+                '"' +
+                exercise +
+                '"' +
+                ',"Mark":' +
+                sum +
+                ',"Possible":' +
+                total +
+                ',"Percent":"' +
+                percent +
+                '","Wrong":"' +
+                wrong +
+                '"}]';
             }
           }
           try {
@@ -2942,81 +3225,8 @@ io.on("connection", async function (socket) {
           } catch (err) {
             console.error("There was an error ", err);
           }
-          
         }
       );
-    } catch (err) {
-      console.error("There was an error ", err);
-    }
-    try {
-      db.query(
-        {
-          sql:
-            "SELECT exerciseGrades FROM users" + ` WHERE name = '` + user + `'`,
-        },
-        function (err, results) {
-          if (err) throw err;
-
-          reCheck = false;
-  
-          let newgrade = JSON.parse(results[0].exerciseGrades);
-          for (let i = 0; i < newgrade.length; i++) {
-            if (newgrade[i].Exercise == exercise) {
-              newgrade[i].Mark = sum;
-              newgrade[i].Possible = possible;
-              reCheck = true;
-            }
-          }
-  
-          if (!reCheck) {
-            if (results[0].exerciseGrades.length == 2) {
-              objgrades =
-                results[0].exerciseGrades.slice(0, -1) +
-                '{"Exercise":' +
-                '"' +
-                exercise +
-                '"' +
-                ',"Mark":' +
-                sum +
-                ',"Possible":' +
-                possible +
-                "}]";
-            } else {
-              objgrades =
-                results[0].exerciseGrades.slice(0, -1) +
-                ',{"Exercise":' +
-                '"' +
-                exercise +
-                '"' +
-                ',"Mark":' +
-                sum +
-                ',"Possible":' +
-                possible +
-                "}]";
-            }
-          } else {
-            objgrades = JSON.stringify(newgrade);
-          }
-          try {
-            db.query(
-              {
-                sql:
-                  "UPDATE users SET exerciseGrades =" +
-                  "'" +
-                  objgrades +
-                  "'" +
-                  ` WHERE name = '` +
-                  user +
-                  `'`,
-              },
-              function (err, results) {
-                if (err) throw err;
-              }
-            );
-          } catch (err) {
-            console.error("There was an error ", err);
-          }
-      });
     } catch (err) {
       console.error("There was an error ", err);
     }
@@ -3037,14 +3247,35 @@ io.on("connection", async function (socket) {
           let exercise = results[0].exercise;
           let scripts = JSON.parse(results[0].script);
           let final;
-          if (type == "HTML" || type == "CSS") {
+          if (type == "HTML" || type == "selfmark") {
             let instruction = {
               Type: type,
               Tag: p1,
               Number: p2,
               Attribute: p3,
               Value: p4,
-              Condition: p5
+              Condition: p5,
+            };
+            scripts.push(instruction);
+            final = JSON.stringify(scripts);
+          } else if (type == "CSS") {
+            let instruction = {
+              Type: type,
+              Selector: p1,
+              Pseudo: p2,
+              Number: p3,
+              Property: p4,
+              Value: p5,
+              Condition: p6,
+            };
+            for (let i = 0; i < scripts.length; i++) {
+              if (scripts[i].Type == "CSS") {
+                if (scripts[i].Selector.includes('"')) {
+                  scripts[i].Selector = scripts[i].Selector.replace(/"/g, '\\"');
+                } else {
+                  continue;
+                } 
+              }
             }
             scripts.push(instruction);
             final = JSON.stringify(scripts);
@@ -3056,10 +3287,11 @@ io.on("connection", async function (socket) {
               Lkey: p3,
               Lvalue: p4,
               Nkey: p5,
-              Nvalue: p6
-            }
+              Nvalue: p6,
+            };
             scripts.push(instruction);
             final = JSON.stringify(scripts);
+            console.log(final);
           }
 
           try {
@@ -3129,7 +3361,6 @@ io.on("connection", async function (socket) {
           } catch (err) {
             console.error("There was an error ", err);
           }
-          
         }
       );
     } catch (err) {
@@ -3181,9 +3412,8 @@ io.on("connection", async function (socket) {
   });
 
   socket.on("markExercise", function (user, file, name) {
-    wss.myFunction(user, file, name)
-  })
-
+    wss.myFunction(user, file, name);
+  });
 });
 
 app.use(
@@ -3219,7 +3449,7 @@ app.use("/content", async function (req, res) {
   }
 });
 
-
 const port = 8080;
 server.listen(port);
 console.debug("🌎 Server listening on port " + port);
+
