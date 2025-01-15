@@ -1,4 +1,4 @@
-// The entire LiemComputing source code.
+// The liem source 
 
 const http = require("http");
 const https = require("https");
@@ -6,7 +6,12 @@ const express = require("express");
 const app = express();
 const server = http.createServer(app);
 const { Server } = require("socket.io");
-const io = new Server(server);
+const io = new Server(server, {
+  connectionStateRecovery: {
+    maxDisconnectionDuration: "Infinity",
+    skipMiddlewares: true,
+  },
+});
 const compression = require("compression");
 const dotenv = require("dotenv");
 const cookieParser = require("cookie-parser");
@@ -19,9 +24,9 @@ const e = require("cors");
 const WebSocket = require("ws");
 var exec = require("child_process").exec;
 const { spawn } = require("child_process");
-const exerciseScripts = require("./scripts/criteria.js");
+const exerciseScripts = require("./checker/criteria.js");
 const libre = require("libreoffice-convert");
-const esprima = require("esprima-next");
+const esprima = require('esprima');
 
 let token;
 let activeTest = [];
@@ -1960,9 +1965,6 @@ io.on("connection", async function (socket) {
         socket.emit("output", error.toString());
       });
       python.on("close", (code) => {
-        if (thingy != 1) {
-          socket.emit("output", "[Exit Code 0]");
-        }
         fs.rmSync(`./temp/${user}${namee}`, { recursive: true }, (err) => {
           if (err) {
             throw err;
@@ -2032,12 +2034,6 @@ io.on("connection", async function (socket) {
       java.on("error", (error) => {
         console.log(`error: ${error.message}`);
         socket.emit("output", error.toString());
-      });
-
-      java.on("close", (code) => {
-        if (thingy != 1) {
-          socket.emit("output", "[Exit Code 0]");
-        }
       });
     }
 
@@ -2113,7 +2109,6 @@ io.on("connection", async function (socket) {
       });
 
       cpp.on("close", (code) => {
-        socket.emit("output", "[Exit Code 0]");
         socket.emit("closed");
       });
     }
@@ -2148,9 +2143,13 @@ io.on("connection", async function (socket) {
     }
     async function asyncCall() {
       const result = await shield();
-      const python = spawn("/home/liemcomputing/julia-1.10.4/bin/julia " + `./temp/${user}${namee}`, {
-        shell: true,
-      });
+      const python = spawn(
+        "/home/liemcomputing/julia-1.10.4/bin/julia " +
+          `./temp/${user}${namee}`,
+        {
+          shell: true,
+        }
+      );
       socket.emit("Program Status", "active");
       socket.on("userinput", function (input) {
         python.stdin.setEncoding("utf-8");
@@ -2174,9 +2173,6 @@ io.on("connection", async function (socket) {
         socket.emit("output", error.toString());
       });
       python.on("close", (code) => {
-        if (thingy != 1) {
-          socket.emit("output", "[Exit Code 0]");
-        }
         fs.rmSync(`./temp/${user}${namee}`, { recursive: true }, (err) => {
           if (err) {
             throw err;
@@ -2886,7 +2882,6 @@ io.on("connection", async function (socket) {
   });
 
   socket.on("getChecked", async function (data, filepath, callback) {
-    // Delete all files in exercises
     try {
       const files = await fs.promises.readdir("./public/exercises/");
       for (const file of files)
@@ -2895,7 +2890,7 @@ io.on("connection", async function (socket) {
       console.error(err);
     }
 
-    // Initialize variables
+    let fileContent = data;
     let student = filepath.split("/")[3];
     let exercise = filepath.slice(
       filepath.lastIndexOf("/") + 1,
@@ -2903,16 +2898,13 @@ io.on("connection", async function (socket) {
     );
     exercise = exercise.toUpperCase();
 
-    // Check if there are any frames
-    let framePattern = /src.*\.html/g;
-    let frames = data.match(framePattern);
-
+    let frames = fileContent.match(/src.*\.html/g);
     if (frames) {
       for (let element of frames) {
         let filename;
         if (element.indexOf("/") > -1) {
           filename = element.slice(element.lastIndexOf("/") + 1);
-          data = data.replace(
+          fileContent = fileContent.replace(
             element.slice(element.indexOf('"') + 1),
             filename
           );
@@ -2920,7 +2912,6 @@ io.on("connection", async function (socket) {
           filename = element.slice(element.indexOf('"') + 1);
         }
         let src;
-        console.log(src);
         if (element.indexOf("/users/") > -1) {
           src =
             filepath.slice(0, filepath.indexOf("/users/")) +
@@ -2928,8 +2919,6 @@ io.on("connection", async function (socket) {
         } else {
           src = filepath.slice(0, filepath.lastIndexOf("/") + 1) + filename;
         }
-        console.log(filename);
-        console.log(src);
         let dest = "./public/exercises/" + filename;
         try {
           await fs.promises.copyFile(src, dest);
@@ -2939,21 +2928,18 @@ io.on("connection", async function (socket) {
       }
     }
 
-    // Check if there are css files
-    let cssPattern = /href.*\.css/g;
-    let css = data.match(cssPattern);
-
+    let css = fileContent.match(/href.*\.css/g);
     if (css) {
       for (let element of css) {
         let filename;
         if (element.indexOf("/") > -1) {
           filename = element.slice(element.lastIndexOf("/") + 1);
-          data = data.replace(
-            element.slice(element.indexOf('"') + 1),
+          fileContent = fileContent.replace(
+            element.slice(element.indexOf("=") + 2),
             filename
           );
         } else {
-          filename = element.slice(element.indexOf('"') + 1);
+          filename = element.slice(element.indexOf("=") + 2);
         }
         let src;
         if (element.indexOf("/users/") > -1) {
@@ -2972,7 +2958,13 @@ io.on("connection", async function (socket) {
       }
     }
 
-    // Write temp.js
+    let js = fileContent.match(/<script>/g);
+    if (js) {    
+      let jsContent = fileContent.slice(fileContent.indexOf(js) + 9);
+      jsContent = jsContent.slice(0, jsContent.indexOf("</script>"));
+      fileContent = fileContent.replace("<script>", `<noscript id='superrandomid'>${JSON.stringify(esprima.tokenize(jsContent))}</noscript><script>`);
+    }
+
     try {
       const results = await new Promise((resolve, reject) => {
         db.query(
@@ -2990,74 +2982,39 @@ io.on("connection", async function (socket) {
         );
       });
 
-      let script = `
-        window.onload = async function () {
-          function standardize_color(str){
-            var ctx = document.createElement('canvas').getContext('2d');
-            ctx.fillStyle = str;
-            return ctx.fillStyle;
-          }
-          let socket = io();
-          let scores = [];
-          let criteria = [];\n`;
-
+      let script = exerciseScripts.initiate();
       let scripts = JSON.parse(results[0].script);
       for (let i = 0; i < scripts.length; i++) {
         if (scripts[i].Type == "HTML") {
-          let required =
-            scripts[i].Type +
-            " " +
-            scripts[i].Number +
-            "<" +
-            scripts[i].Tag +
-            ">";
+          let criteria = `${scripts[i].Type} ${scripts[i].Number}<${scripts[i].Tag}>`;
           let optional =
             scripts[i].Attribute != "*"
-              ? " with " + scripts[i].Attribute + " == " + scripts[i].Value
+              ? ` with ${scripts[i].Attribute} == ${scripts[i].Value}`
               : "";
-          let criteriaItem = required + optional;
-          script += `\tcriteria.push('${criteriaItem}');\n`;
-          script += exerciseScripts.html(scripts[i]);
+          criteria += optional;
+          script += exerciseScripts.html(criteria, scripts[i]);
         } else if (scripts[i].Type == "CSS") {
-          let final = "";
-          if (scripts[i].Pseudo == "*") {
-            final += scripts[i].Type + " <" + scripts[i].Selector + ">";
-          } else {
-            final += scripts[i].Type + " <" + scripts[i].Selector + scripts[i].Pseudo + ">";
-          }
-          final += " with " + scripts[i].Property + " == " + scripts[i].Value;
-          if (scripts[i].Condition != "*") {
-            final += " if " + scripts[i].Condition;
-          }
-          script += `\tcriteria.push('${final}');\n`;
-          script += exerciseScripts.css(scripts[i]);
+          let criteria =
+            scripts[i].Pseudo == "*"
+              ? `${scripts[i].Type} <${scripts[i].Selector}>`
+              : `${scripts[i].Type} <${scripts[i].Selector}${scripts[i].Pseudo}>`;
+          criteria +=
+            " with " + scripts[i].Property + " == " + scripts[i].Value;
+          criteria +=
+            scripts[i].Condition != "*" ? ` if ${scripts[i].Condition}` : "";
+          script += exerciseScripts.css(criteria, scripts[i]);
         } else if (scripts[i].Type == "JS") {
-          let required =
-            scripts[i].Type + " " + scripts[i].Key + " == " + scripts[i].Value;
-          let before =
-            scripts[i].Lkey != "*"
-              ? " before: " + scripts[i].Lkey + " == " + scripts[i].Lvalue
-              : "";
-          let after =
-            scripts[i].Nkey != "*"
-              ? " after: " + scripts[i].Nkey + " == " + scripts[i].Nvalue
-              : "";
-          let criteriaItem = "[" + required + after + before + "]";
-          script += `\tcriteria.push('${criteriaItem}');\n`;
-          script += exerciseScripts.js(scripts[i]);
+          let criteria = scripts[i].Type + " " + scripts[i].Number + " " + scripts[i].Key;
+          criteria +=  scripts[i].Value != "*" ? " == " + scripts[i].Value : "";
+          script += exerciseScripts.js(criteria, scripts[i]);
         } else if (scripts[i].Type == "selfmark") {
-          let criteriaItem = "selfmark";
-          script += `\tcriteria.push('${criteriaItem}');\n`;
           script += exerciseScripts.selfmark(scripts[i]);
         }
       }
-
-      script += `\t\n\tsocket.emit("getScore", "${student}", "${exercise}", scores, criteria);\n}`;
-
-      // Create temp.html and temp.js
+      script += exerciseScripts.end(student, exercise);
 
       await fs.promises.writeFile("./public/exercises/temp.js", script);
-      await fs.promises.writeFile("./public/exercises/temp.html", data);
+      await fs.promises.writeFile("./public/exercises/temp.html", fileContent);
 
       callback();
     } catch (err) {
@@ -3104,10 +3061,6 @@ io.on("connection", async function (socket) {
       all.push(files[i]);
     }
     callback(all);
-  });
-
-  socket.on("tokenize", (program, callback) => {
-    callback(esprima.tokenize(program));
   });
 
   socket.on("getScore", (user, exercise, scores, criteria) => {
@@ -3271,10 +3224,13 @@ io.on("connection", async function (socket) {
             for (let i = 0; i < scripts.length; i++) {
               if (scripts[i].Type == "CSS") {
                 if (scripts[i].Selector.includes('"')) {
-                  scripts[i].Selector = scripts[i].Selector.replace(/"/g, '\\"');
+                  scripts[i].Selector = scripts[i].Selector.replace(
+                    /"/g,
+                    '\\"'
+                  );
                 } else {
                   continue;
-                } 
+                }
               }
             }
             scripts.push(instruction);
@@ -3284,10 +3240,7 @@ io.on("connection", async function (socket) {
               Type: type,
               Key: p1,
               Value: p2,
-              Lkey: p3,
-              Lvalue: p4,
-              Nkey: p5,
-              Nvalue: p6,
+              Number: p3
             };
             scripts.push(instruction);
             final = JSON.stringify(scripts);
@@ -3452,4 +3405,3 @@ app.use("/content", async function (req, res) {
 const port = 8080;
 server.listen(port);
 console.debug("🌎 Server listening on port " + port);
-
